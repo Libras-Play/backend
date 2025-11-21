@@ -271,7 +271,7 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
-          scan-ref: 'services/api/${{ matrix.service.name }}'
+          scan-ref: 'services/${{ matrix.service.name }}'
           format: 'sarif'
           output: 'trivy-fs-${{ matrix.service.name }}.sarif'
           severity: 'HIGH,CRITICAL'
@@ -297,7 +297,7 @@ jobs:
         run: |
           # Generate human-readable reports
           trivy image --format table --output trivy-container-${{ matrix.service.name }}.txt ${{ matrix.service.name }}:${{ github.sha }} || true
-          trivy fs --format table --output trivy-fs-${{ matrix.service.name }}.txt services/api/${{ matrix.service.name }} || true
+          trivy fs --format table --output trivy-fs-${{ matrix.service.name }}.txt services/${{ matrix.service.name }} || true
       
       - name: Upload Trivy Reports as Artifacts
         if: matrix.service.condition == 'true'
@@ -966,7 +966,7 @@ jobs:
         service: [content-service, user-service, ml-service]
     defaults:
       run:
-        working-directory: services/api/${{ matrix.service }}
+        working-directory: services/${{ matrix.service }}
     
     steps:
       - uses: actions/checkout@v4
@@ -1006,8 +1006,8 @@ jobs:
         with:
           name: security-reports-${{ matrix.service }}
           path: |
-            services/api/${{ matrix.service }}/bandit-report.json
-            services/api/${{ matrix.service }}/safety-report.json
+            services/${{ matrix.service }}/bandit-report.json
+            services/${{ matrix.service }}/safety-report.json
           retention-days: 30
 
   gitleaks-scan:
@@ -1031,7 +1031,7 @@ jobs:
         service: [content-service, user-service, ml-service]
     defaults:
       run:
-        working-directory: services/api/${{ matrix.service }}
+        working-directory: services/${{ matrix.service }}
     
     steps:
       - uses: actions/checkout@v4

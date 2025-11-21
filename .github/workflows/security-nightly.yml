@@ -143,7 +143,7 @@ jobs:
       
       - name: Install dependencies
         if: matrix.scan-type == 'dependency' || matrix.scan-type == 'container'
-        working-directory: services/api/${{ matrix.service }}
+        working-directory: services/${{ matrix.service }}
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then
@@ -158,7 +158,7 @@ jobs:
         if: matrix.scan-type == 'container'
         uses: docker/build-push-action@v5
         with:
-          context: services/api/${{ matrix.service }}
+          context: services/${{ matrix.service }}
           tags: ${{ matrix.service }}:nightly-scan
           load: true
           cache-from: type=gha
@@ -169,7 +169,7 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
-          scan-ref: 'services/api/${{ matrix.service }}'
+          scan-ref: 'services/${{ matrix.service }}'
           format: 'sarif'
           output: 'trivy-fs-${{ matrix.service }}-nightly.sarif'
           severity: 'LOW,MEDIUM,HIGH,CRITICAL'
@@ -181,7 +181,7 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
-          scan-ref: 'services/api/${{ matrix.service }}'
+          scan-ref: 'services/${{ matrix.service }}'
           format: 'sarif'
           output: 'trivy-deps-${{ matrix.service }}-nightly.sarif'
           severity: 'MEDIUM,HIGH,CRITICAL'
@@ -203,7 +203,7 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
-          scan-ref: 'services/api/${{ matrix.service }}'
+          scan-ref: 'services/${{ matrix.service }}'
           format: 'sarif'
           output: 'trivy-secrets-${{ matrix.service }}-nightly.sarif'
           severity: 'HIGH,CRITICAL'
@@ -248,13 +248,13 @@ jobs:
           pip install pip-audit pip-licenses safety
       
       - name: Run pip-audit
-        working-directory: services/api/${{ matrix.service }}
+        working-directory: services/${{ matrix.service }}
         run: |
           pip-audit --format=json --output=pip-audit-${{ matrix.service }}.json || true
           pip-audit --format=cyclonedx-json --output=sbom-${{ matrix.service }}.json || true
       
       - name: Generate license report
-        working-directory: services/api/${{ matrix.service }}
+        working-directory: services/${{ matrix.service }}
         run: |
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
@@ -262,7 +262,7 @@ jobs:
           fi
       
       - name: Run Safety scan
-        working-directory: services/api/${{ matrix.service }}
+        working-directory: services/${{ matrix.service }}
         run: |
           safety check --json --output safety-${{ matrix.service }}.json || true
       
@@ -272,10 +272,10 @@ jobs:
         with:
           name: nightly-dependency-${{ matrix.service }}
           path: |
-            services/api/${{ matrix.service }}/pip-audit-${{ matrix.service }}.json
-            services/api/${{ matrix.service }}/sbom-${{ matrix.service }}.json
-            services/api/${{ matrix.service }}/licenses-${{ matrix.service }}.json
-            services/api/${{ matrix.service }}/safety-${{ matrix.service }}.json
+            services/${{ matrix.service }}/pip-audit-${{ matrix.service }}.json
+            services/${{ matrix.service }}/sbom-${{ matrix.service }}.json
+            services/${{ matrix.service }}/licenses-${{ matrix.service }}.json
+            services/${{ matrix.service }}/safety-${{ matrix.service }}.json
           retention-days: 90
 
   infrastructure-security:
