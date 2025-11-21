@@ -17,7 +17,7 @@ terraform {
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.6.0"  # Pin to specific minor version
+      version = "~> 3.7.2"  # Pin to specific minor version
     }
   }
 
