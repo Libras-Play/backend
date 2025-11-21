@@ -1,14 +1,13 @@
-# ⚠️ WORKFLOW DESHABILITADO - Ver ci.yml para tests básicos
 name: Trivy Security Scanner
 
 on:
-  # push:
-    # branches: [main, develop, staging]
+  push:
+    branches: [main, develop, staging]
   pull_request:
-    # branches: [main, staging]
-  # schedule:
+    branches: [main, staging]
+  schedule:
     # Nightly filesystem and dependency scans at 1 AM UTC
-    # - cron: '0 1 * * *'
+    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       scan_type:
