@@ -1,0 +1,33 @@
+# Code Owners
+
+# This file defines the code owners for different parts of the repository.
+# Code owners are automatically requested for review when someone opens a pull request that modifies code that they own.
+
+# Default owners for everything in the repo
+* @librasplay/maintainers
+
+# Services
+/services/api/content-service/ @librasplay/backend-team
+/services/api/user-service/ @librasplay/backend-team
+/services/api/ml-service/ @librasplay/ml-team @librasplay/backend-team
+/services/api/adaptive-service/ @librasplay/ml-team @librasplay/backend-team
+
+# Infrastructure
+/infra/ @librasplay/devops-team @librasplay/maintainers
+/infra/terraform/ @librasplay/devops-team
+
+# CI/CD
+/.github/workflows/ @librasplay/devops-team @librasplay/maintainers
+
+# Documentation
+/docs/ @librasplay/maintainers
+README.md @librasplay/maintainers
+SECURITY.md @librasplay/maintainers
+CONTRIBUTING.md @librasplay/maintainers
+
+# Database migrations (require careful review)
+**/alembic/versions/ @librasplay/backend-team @librasplay/maintainers
+
+# Security-critical files
+/.github/workflows/security*.yml @librasplay/security-team @librasplay/maintainers
+/scripts/setup*.sh @librasplay/devops-team @librasplay/security-team

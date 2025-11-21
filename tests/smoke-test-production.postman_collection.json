@@ -1,0 +1,468 @@
+{
+  "info": {
+    "name": "Libras Play - Smoke Test Production",
+    "_postman_id": "smoke-test-libras-play",
+    "description": "Smoke tests para validar que la infraestructura funciona correctamente en producción",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Health Checks",
+      "item": [
+        {
+          "name": "Content Service - Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ALB_URL}}/content/health",
+              "host": ["{{ALB_URL}}"],
+              "path": ["content", "health"]
+            }
+          }
+        },
+        {
+          "name": "User Service - Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ALB_URL}}/user/health",
+              "host": ["{{ALB_URL}}"],
+              "path": ["user", "health"]
+            }
+          }
+        },
+        {
+          "name": "ML Service - Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ALB_URL}}/ml/health",
+              "host": ["{{ALB_URL}}"],
+              "path": ["ml", "health"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Cognito Auth",
+      "item": [
+        {
+          "name": "Register User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test(\"User created\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('userSub');",
+                  "    pm.collectionVariables.set('userSub', jsonData.userSub);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test-{{$timestamp}}@librasplay.com\",\n  \"password\": \"TestPass123!\",\n  \"username\": \"testuser{{$timestamp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{ALB_URL}}/user/auth/register",
+              "host": ["{{ALB_URL}}"],
+              "path": ["user", "auth", "register"]
+            }
+          }
+        },
+        {
+          "name": "Login User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Token received\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('accessToken');",
+                  "    pm.collectionVariables.set('accessToken', jsonData.accessToken);",
+                  "    pm.collectionVariables.set('idToken', jsonData.idToken);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{ALB_URL}}/user/auth/login",
+              "host": ["{{ALB_URL}}"],
+              "path": ["user", "auth", "login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Content Endpoints",
+      "item": [
+        {
+          "name": "Get All Levels",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Levels returned\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.be.an('array');",
+                  "    if (jsonData.length > 0) {",
+                  "        pm.collectionVariables.set('levelId', jsonData[0].id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ALB_URL}}/content/levels",
+              "host": ["{{ALB_URL}}"],
+              "path": ["content", "levels"]
+            }
+          }
+        },
+        {
+          "name": "Get Exercises by Level",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Exercises returned\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.be.an('array');",
+                  "    if (jsonData.length > 0) {",
+                  "        pm.collectionVariables.set('exerciseId', jsonData[0].id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ALB_URL}}/content/exercises?levelId={{levelId}}",
+              "host": ["{{ALB_URL}}"],
+              "path": ["content", "exercises"],
+              "query": [
+                {
+                  "key": "levelId",
+                  "value": "{{levelId}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. User Progress",
+      "item": [
+        {
+          "name": "Get User Progress",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Progress data returned\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('userId');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ALB_URL}}/user/progress",
+              "host": ["{{ALB_URL}}"],
+              "path": ["user", "progress"]
+            }
+          }
+        },
+        {
+          "name": "Update Lives",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Lives updated\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('lives');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"livesChange\": -1\n}"
+            },
+            "url": {
+              "raw": "{{ALB_URL}}/user/progress/lives",
+              "host": ["{{ALB_URL}}"],
+              "path": ["user", "progress", "lives"]
+            }
+          }
+        },
+        {
+          "name": "Gain Experience",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"XP updated\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('xp');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"xpGained\": 50\n}"
+            },
+            "url": {
+              "raw": "{{ALB_URL}}/user/progress/xp",
+              "host": ["{{ALB_URL}}"],
+              "path": ["user", "progress", "xp"]
+            }
+          }
+        },
+        {
+          "name": "Export Progress",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Export data returned\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('userId');",
+                  "    pm.expect(jsonData).to.have.property('exportedAt');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ALB_URL}}/user/progress/export",
+              "host": ["{{ALB_URL}}"],
+              "path": ["user", "progress", "export"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. ML Service",
+      "item": [
+        {
+          "name": "Predict Sign",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Prediction returned\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('prediction');",
+                  "    pm.expect(jsonData).to.have.property('confidence');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imageData\": \"base64_encoded_image_here\",\n  \"exerciseId\": \"{{exerciseId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{ALB_URL}}/ml/predict",
+              "host": ["{{ALB_URL}}"],
+              "path": ["ml", "predict"]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "ALB_URL",
+      "value": "http://libras-play-dev-alb-1450968088.us-east-1.elb.amazonaws.com",
+      "type": "string"
+    },
+    {
+      "key": "username",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "idToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userSub",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "levelId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "exerciseId",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

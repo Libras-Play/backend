@@ -1,0 +1,605 @@
+name: CD - Continuous Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.11'
+  TERRAFORM_VERSION: '1.6.0'
+
+jobs:
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      content-service: ${{ steps.filter.outputs.content-service }}
+      user-service: ${{ steps.filter.outputs.user-service }}
+      ml-service: ${{ steps.filter.outputs.ml-service }}
+      infrastructure: ${{ steps.filter.outputs.infrastructure }}
+      environment: ${{ steps.set-env.outputs.environment }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            content-service:
+              - 'services/content-service/**'
+            user-service:
+              - 'services/user-service/**'
+            ml-service:
+              - 'services/ml-service/**'
+            infrastructure:
+              - 'infra/terraform/**'
+      
+      - name: Determine Environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          else
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          fi
+
+  build-and-push-content:
+    name: Build & Push - Content Service
+    needs: detect-changes
+    if: needs.detect-changes.outputs.content-service == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPO_CONTENT }}
+          tags: |
+            type=sha,prefix={{branch}}-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Build and Push Docker Image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: services/content-service
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+      
+      - name: Save Image Tag
+        run: |
+          echo "IMAGE_TAG=${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPO_CONTENT }}:${{ github.ref_name }}-${{ github.sha }}" >> $GITHUB_ENV
+          echo "Image: $IMAGE_TAG" >> $GITHUB_STEP_SUMMARY
+
+  build-and-push-user:
+    name: Build & Push - User Service
+    needs: detect-changes
+    if: needs.detect-changes.outputs.user-service == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPO_USER }}
+          tags: |
+            type=sha,prefix={{branch}}-
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: services/user-service
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-and-push-ml:
+    name: Build & Push - ML Service
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ml-service == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPO_ML }}
+          tags: |
+            type=sha,prefix={{branch}}-
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: services/ml-service
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-ecs-content:
+    name: Deploy to ECS - Content Service
+    needs: [detect-changes, build-and-push-content]
+    if: needs.detect-changes.outputs.content-service == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.detect-changes.outputs.environment }}
+      url: ${{ steps.get-alb.outputs.alb-url }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Get Current Task Definition
+        id: get-task-def
+        run: |
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster aplicacion-senas-${{ needs.detect-changes.outputs.environment }}-cluster \
+            --services content-service \
+            --query 'services[0].taskDefinition' \
+            --output text)
+          
+          aws ecs describe-task-definition \
+            --task-definition $TASK_DEF_ARN \
+            --query 'taskDefinition' > task-definition.json
+          
+          # Save for rollback
+          echo "previous-task-def=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
+      
+      - name: Update Task Definition with New Image
+        id: update-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: content-service
+          image: ${{ needs.build-and-push-content.outputs.image-tag }}
+      
+      - name: Deploy to Amazon ECS
+        id: deploy
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.update-task-def.outputs.task-definition }}
+          service: content-service
+          cluster: aplicacion-senas-${{ needs.detect-changes.outputs.environment }}-cluster
+          wait-for-service-stability: true
+          wait-for-minutes: 10
+      
+      - name: Get ALB URL
+        id: get-alb
+        run: |
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --names aplicacion-senas-${{ needs.detect-changes.outputs.environment }}-alb \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text)
+          echo "alb-url=http://$ALB_DNS/content/health" >> $GITHUB_OUTPUT
+      
+      - name: Health Check
+        run: |
+          sleep 30
+          curl -f ${{ steps.get-alb.outputs.alb-url }} || exit 1
+      
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "Deployment failed, rolling back to previous task definition"
+          aws ecs update-service \
+            --cluster aplicacion-senas-${{ needs.detect-changes.outputs.environment }}-cluster \
+            --service content-service \
+            --task-definition ${{ steps.get-task-def.outputs.previous-task-def }} \
+            --force-new-deployment
+          
+          echo "## ⚠️ Rollback Executed" >> $GITHUB_STEP_SUMMARY
+          echo "Previous task definition restored: ${{ steps.get-task-def.outputs.previous-task-def }}" >> $GITHUB_STEP_SUMMARY
+
+  deploy-ecs-user:
+    name: Deploy to ECS - User Service
+    needs: [detect-changes, build-and-push-user]
+    if: needs.detect-changes.outputs.user-service == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.detect-changes.outputs.environment }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Get Current Task Definition
+        id: get-task-def
+        run: |
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster aplicacion-senas-${{ needs.detect-changes.outputs.environment }}-cluster \
+            --services user-service \
+            --query 'services[0].taskDefinition' \
+            --output text)
+          
+          aws ecs describe-task-definition \
+            --task-definition $TASK_DEF_ARN \
+            --query 'taskDefinition' > task-definition.json
+          
+          echo "previous-task-def=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
+      
+      - name: Update Task Definition
+        id: update-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: user-service
+          image: ${{ needs.build-and-push-user.outputs.image-tag }}
+      
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.update-task-def.outputs.task-definition }}
+          service: user-service
+          cluster: aplicacion-senas-${{ needs.detect-changes.outputs.environment }}-cluster
+          wait-for-service-stability: true
+      
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          aws ecs update-service \
+            --cluster aplicacion-senas-${{ needs.detect-changes.outputs.environment }}-cluster \
+            --service user-service \
+            --task-definition ${{ steps.get-task-def.outputs.previous-task-def }} \
+            --force-new-deployment
+
+  deploy-ecs-ml:
+    name: Deploy to ECS - ML Service
+    needs: [detect-changes, build-and-push-ml]
+    if: needs.detect-changes.outputs.ml-service == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.detect-changes.outputs.environment }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Get Current Task Definition
+        id: get-task-def
+        run: |
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster aplicacion-senas-${{ needs.detect-changes.outputs.environment }}-cluster \
+            --services ml-service \
+            --query 'services[0].taskDefinition' \
+            --output text)
+          
+          aws ecs describe-task-definition \
+            --task-definition $TASK_DEF_ARN \
+            --query 'taskDefinition' > task-definition.json
+          
+          echo "previous-task-def=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
+      
+      - name: Update Task Definition
+        id: update-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ml-service
+          image: ${{ needs.build-and-push-ml.outputs.image-tag }}
+      
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.update-task-def.outputs.task-definition }}
+          service: ml-service
+          cluster: aplicacion-senas-${{ needs.detect-changes.outputs.environment }}-cluster
+          wait-for-service-stability: true
+      
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          aws ecs update-service \
+            --cluster aplicacion-senas-${{ needs.detect-changes.outputs.environment }}-cluster \
+            --service ml-service \
+            --task-definition ${{ steps.get-task-def.outputs.previous-task-def }} \
+            --force-new-deployment
+
+  terraform-plan:
+    name: Terraform Plan
+    needs: detect-changes
+    if: needs.detect-changes.outputs.infrastructure == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform/environments/${{ needs.detect-changes.outputs.environment == 'production' && 'prod' || 'dev' }}
+    outputs:
+      plan-exitcode: ${{ steps.plan.outputs.exitcode }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Terraform Init
+        run: terraform init
+      
+      - name: Terraform Plan
+        id: plan
+        env:
+          TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
+        run: |
+          terraform plan -detailed-exitcode -no-color -out=tfplan || echo "exitcode=$?" >> $GITHUB_OUTPUT
+      
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: infra/terraform/environments/${{ needs.detect-changes.outputs.environment == 'production' && 'prod' || 'dev' }}/tfplan
+          retention-days: 5
+      
+      - name: Comment Plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `### Terraform Plan 📊
+            
+            **Environment:** \`${{ needs.detect-changes.outputs.environment }}\`
+            **Workspace:** \`${{ needs.detect-changes.outputs.environment == 'production' && 'prod' || 'dev' }}\`
+            
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`terraform
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+            
+            </details>`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+  terraform-apply:
+    name: Terraform Apply
+    needs: [detect-changes, terraform-plan]
+    if: |
+      needs.detect-changes.outputs.infrastructure == 'true' &&
+      needs.terraform-plan.outputs.plan-exitcode == '2'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.detect-changes.outputs.environment }}-infrastructure
+    defaults:
+      run:
+        working-directory: infra/terraform/environments/${{ needs.detect-changes.outputs.environment == 'production' && 'prod' || 'dev' }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Terraform Init
+        run: terraform init
+      
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: infra/terraform/environments/${{ needs.detect-changes.outputs.environment == 'production' && 'prod' || 'dev' }}
+      
+      - name: Terraform Apply
+        env:
+          TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
+        run: |
+          terraform apply -auto-approve tfplan
+      
+      - name: Output Infrastructure Info
+        run: |
+          echo "## Infrastructure Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          terraform output -json > outputs.json
+          echo "**Environment:** ${{ needs.detect-changes.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources Deployed" >> $GITHUB_STEP_SUMMARY
+          cat outputs.json >> $GITHUB_STEP_SUMMARY
+
+  run-migrations:
+    name: Run Database Migrations
+    needs: [detect-changes, terraform-apply, deploy-ecs-content]
+    if: |
+      always() &&
+      (needs.terraform-apply.result == 'success' || needs.deploy-ecs-content.result == 'success')
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.detect-changes.outputs.environment }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install Alembic
+        run: |
+          pip install alembic psycopg2-binary
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Get RDS Endpoint from Secrets Manager
+        id: get-db
+        run: |
+          SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id aplicacion-senas-${{ needs.detect-changes.outputs.environment }}-rds-credentials \
+            --query 'SecretString' \
+            --output text)
+          
+          echo "DB_HOST=$(echo $SECRET | jq -r '.host')" >> $GITHUB_ENV
+          echo "DB_PASSWORD=$(echo $SECRET | jq -r '.password')" >> $GITHUB_ENV
+      
+      - name: Run Alembic Migrations
+        working-directory: services/content-service
+        env:
+          DATABASE_URL: postgresql://postgres:${{ env.DB_PASSWORD }}@${{ env.DB_HOST }}:5432/content_db
+        run: |
+          alembic upgrade head
+      
+      - name: Verify Migration
+        run: |
+          echo "## Database Migration Complete ✅" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: ${{ needs.detect-changes.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+
+  deployment-summary:
+    name: Deployment Summary
+    needs:
+      - detect-changes
+      - deploy-ecs-content
+      - deploy-ecs-user
+      - deploy-ecs-ml
+      - terraform-apply
+      - run-migrations
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "# 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ needs.detect-changes.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Service Deployments" >> $GITHUB_STEP_SUMMARY
+          echo "- Content Service: ${{ needs.deploy-ecs-content.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- User Service: ${{ needs.deploy-ecs-user.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ML Service: ${{ needs.deploy-ecs-ml.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Infrastructure" >> $GITHUB_STEP_SUMMARY
+          echo "- Terraform Apply: ${{ needs.terraform-apply.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Database Migrations: ${{ needs.run-migrations.result }}" >> $GITHUB_STEP_SUMMARY
