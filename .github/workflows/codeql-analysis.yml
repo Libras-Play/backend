@@ -15,7 +15,7 @@ on:
       languages:
         description: 'Languages to analyze (comma-separated)'
         required: false
-        default: 'python,javascript'
+        default: 'python'
       deep_analysis:
         description: 'Run deep analysis with extended queries'
         type: boolean
@@ -37,8 +37,6 @@ jobs:
         language: ['python']
         include:
           - language: python
-            build-mode: none
-          - language: typescript
             build-mode: none
 
     steps:
