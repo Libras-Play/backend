@@ -1,15 +1,11 @@
-name: CI/CD Pipeline
+# ⚠️ WORKFLOW DESHABILITADO - Usa cd-secure.yml en su lugar
+# Este workflow tiene configuraciones obsoletas de environments
+# Para habilitarlo, configura los environments 'staging' y 'production' en GitHub
+
+name: CI/CD Pipeline (Disabled)
 
 on:
-  push:
-    branches: [main, develop]
-    paths:
-      - 'backend/**'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'backend/**'
-  workflow_dispatch:
+  workflow_dispatch:  # Solo manual
     inputs:
       environment:
         description: 'Environment to deploy'
@@ -18,6 +14,14 @@ on:
         options:
           - staging
           - production
+  # push:
+  #   branches: [main, develop]
+  #   paths:
+  #     - 'backend/**'
+  # pull_request:
+  #   branches: [main]
+  #   paths:
+  #     - 'backend/**'
 
 env:
   AWS_REGION: us-east-1
