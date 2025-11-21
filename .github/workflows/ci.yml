@@ -89,7 +89,7 @@ jobs:
           pytest tests/ -v --cov=app --cov-report=term --cov-report=xml --cov-report=html
       
       - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ./services/content-service/coverage.xml
           flags: content-service
@@ -158,7 +158,7 @@ jobs:
           pytest tests/ -v --cov=app --cov-report=term --cov-report=xml --cov-report=html
       
       - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ./services/user-service/coverage.xml
           flags: user-service
@@ -212,7 +212,7 @@ jobs:
           pytest tests/ -v --cov=app --cov-report=term --cov-report=xml --cov-report=html
       
       - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ./services/ml-service/coverage.xml
           flags: ml-service
