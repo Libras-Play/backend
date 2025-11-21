@@ -39,11 +39,11 @@ jobs:
         with:
           filters: |
             content-service:
-              - 'services/api/content-service/**'
+              - 'services/content-service/**'
             user-service:
-              - 'services/api/user-service/**'
+              - 'services/user-service/**'
             ml-service:
-              - 'services/api/ml-service/**'
+              - 'services/ml-service/**'
             infrastructure:
               - 'infra/terraform/**'
       
@@ -99,7 +99,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: services/api/content-service
+          context: services/content-service
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -153,7 +153,7 @@ jobs:
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
-          context: services/api/user-service
+          context: services/user-service
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -198,7 +198,7 @@ jobs:
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
-          context: services/api/ml-service
+          context: services/ml-service
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -564,7 +564,7 @@ jobs:
           echo "DB_PASSWORD=$(echo $SECRET | jq -r '.password')" >> $GITHUB_ENV
       
       - name: Run Alembic Migrations
-        working-directory: services/api/content-service
+        working-directory: services/content-service
         env:
           DATABASE_URL: postgresql://postgres:${{ env.DB_PASSWORD }}@${{ env.DB_HOST }}:5432/content_db
         run: |

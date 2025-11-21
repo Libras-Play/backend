@@ -33,11 +33,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ${{ fromJSON(github.event.inputs.languages && format('[{0}]', github.event.inputs.languages) || '["python", "javascript", "typescript"]') }}
+        # Solo Python - este es un backend Python sin JavaScript/TypeScript
+        language: ['python']
         include:
           - language: python
-            build-mode: none
-          - language: javascript
             build-mode: none
           - language: typescript
             build-mode: none

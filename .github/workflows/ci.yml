@@ -27,16 +27,16 @@ jobs:
         with:
           filters: |
             content-service:
-              - 'services/api/content-service/**'
+              - 'services/content-service/**'
               - 'services/shared/**'
             user-service:
-              - 'services/api/user-service/**'
+              - 'services/user-service/**'
               - 'services/shared/**'
             ml-service:
-              - 'services/api/ml-service/**'
+              - 'services/ml-service/**'
               - 'services/shared/**'
             adaptive-service:
-              - 'services/api/adaptive-service/**'
+              - 'services/adaptive-service/**'
               - 'services/shared/**'
             infrastructure:
               - 'infra/terraform/**'
@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/api/content-service
+        working-directory: services/content-service
     
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +59,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
-          cache-dependency-path: services/api/content-service/requirements.txt
+          cache-dependency-path: services/content-service/requirements.txt
       
       - name: Install dependencies
         run: |
@@ -91,7 +91,7 @@ jobs:
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: ./services/api/content-service/coverage.xml
+          files: ./services/content-service/coverage.xml
           flags: content-service
           name: content-service-coverage
           fail_ci_if_error: false
@@ -103,7 +103,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/api/user-service
+        working-directory: services/user-service
     
     steps:
       - uses: actions/checkout@v4
@@ -113,7 +113,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
-          cache-dependency-path: services/api/user-service/requirements.txt
+          cache-dependency-path: services/user-service/requirements.txt
       
       - name: Install dependencies
         run: |
@@ -160,7 +160,7 @@ jobs:
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: ./services/api/user-service/coverage.xml
+          files: ./services/user-service/coverage.xml
           flags: user-service
           name: user-service-coverage
           fail_ci_if_error: false
@@ -172,7 +172,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/api/ml-service
+        working-directory: services/ml-service
     
     steps:
       - uses: actions/checkout@v4
@@ -182,7 +182,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
-          cache-dependency-path: services/api/ml-service/requirements.txt
+          cache-dependency-path: services/ml-service/requirements.txt
       
       - name: Install dependencies
         run: |
@@ -214,7 +214,7 @@ jobs:
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: ./services/api/ml-service/coverage.xml
+          files: ./services/ml-service/coverage.xml
           flags: ml-service
           name: ml-service-coverage
           fail_ci_if_error: false
@@ -227,13 +227,13 @@ jobs:
       matrix:
         service:
           - name: content-service
-            path: services/api/content-service
+            path: services/content-service
             condition: ${{ needs.detect-changes.outputs.content-service == 'true' }}
           - name: user-service
-            path: services/api/user-service
+            path: services/user-service
             condition: ${{ needs.detect-changes.outputs.user-service == 'true' }}
           - name: ml-service
-            path: services/api/ml-service
+            path: services/ml-service
             condition: ${{ needs.detect-changes.outputs.ml-service == 'true' }}
     
     steps:
@@ -335,9 +335,9 @@ jobs:
       matrix:
         service:
           - name: content-service
-            path: services/api/content-service
+            path: services/content-service
           - name: adaptive-service
-            path: services/api/adaptive-service
+            path: services/adaptive-service
     
     defaults:
       run:
@@ -554,10 +554,10 @@ jobs:
       matrix:
         service:
           - name: content-service
-            path: services/api/content-service
+            path: services/content-service
             has_validation: true
           - name: adaptive-service  
-            path: services/api/adaptive-service
+            path: services/adaptive-service
             has_validation: false
     
     defaults:

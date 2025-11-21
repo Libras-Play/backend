@@ -53,11 +53,11 @@ jobs:
         with:
           filters: |
             content-service:
-              - 'services/api/content-service/**'
+              - 'services/content-service/**'
             user-service:
-              - 'services/api/user-service/**'
+              - 'services/user-service/**'
             ml-service:
-              - 'services/api/ml-service/**'
+              - 'services/ml-service/**'
             infrastructure:
               - 'infra/terraform/**'
       
@@ -102,7 +102,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/api/content-service
+        working-directory: services/content-service
     outputs:
       image-uri: ${{ steps.build-push.outputs.image-uri }}
     
@@ -139,7 +139,7 @@ jobs:
         id: build-push
         uses: docker/build-push-action@v5
         with:
-          context: services/api/content-service
+          context: services/content-service
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -170,7 +170,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/api/user-service
+        working-directory: services/user-service
     outputs:
       image-uri: ${{ steps.build-push.outputs.image-uri }}
     
@@ -207,7 +207,7 @@ jobs:
         id: build-push
         uses: docker/build-push-action@v5
         with:
-          context: services/api/user-service
+          context: services/user-service
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -238,7 +238,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/api/ml-service
+        working-directory: services/ml-service
     outputs:
       image-uri: ${{ steps.build-push.outputs.image-uri }}
     
@@ -275,7 +275,7 @@ jobs:
         id: build-push
         uses: docker/build-push-action@v5
         with:
-          context: services/api/ml-service
+          context: services/ml-service
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
