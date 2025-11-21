@@ -13,7 +13,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.70.0"  # Pin to specific minor version for security
+      version = "~> 6.22.0"  # Pin to specific minor version for security
     }
     random = {
       source  = "hashicorp/random"
