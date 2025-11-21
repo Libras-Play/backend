@@ -344,7 +344,7 @@ jobs:
           image: ${{ needs.build-and-push-content-service.outputs.image-uri }}
       
       - name: Deploy to Amazon ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-task-def.outputs.task-definition }}
           service: content-service-${{ needs.detect-changes.outputs.environment }}
@@ -426,7 +426,7 @@ jobs:
           image: ${{ needs.build-and-push-user-service.outputs.image-uri }}
       
       - name: Deploy to Amazon ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-task-def.outputs.task-definition }}
           service: user-service-${{ needs.detect-changes.outputs.environment }}
@@ -508,7 +508,7 @@ jobs:
           image: ${{ needs.build-and-push-ml-service.outputs.image-uri }}
       
       - name: Deploy to Amazon ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-task-def.outputs.task-definition }}
           service: ml-service-${{ needs.detect-changes.outputs.environment }}
