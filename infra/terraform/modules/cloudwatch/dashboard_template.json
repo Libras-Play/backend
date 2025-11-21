@@ -1,0 +1,329 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 1,
+      "properties": {
+        "markdown": "# 📊 Aplicación de Señas - Dashboard de Monitoreo\n\n---"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 1,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "AWS/ApplicationELB", "RequestCount", { "stat": "Sum", "label": "Total Requests" } ],
+          [ ".", "HTTPCode_Target_2XX_Count", { "stat": "Sum", "label": "2xx Responses" } ],
+          [ ".", "HTTPCode_Target_4XX_Count", { "stat": "Sum", "label": "4xx Errors" } ],
+          [ ".", "HTTPCode_Target_5XX_Count", { "stat": "Sum", "label": "5xx Errors", "yAxis": "right" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "🌐 ALB - Request Count & Status Codes",
+        "period": 60,
+        "yAxis": {
+          "left": {
+            "showUnits": false
+          },
+          "right": {
+            "showUnits": false
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 1,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "AWS/ApplicationELB", "TargetResponseTime", { "stat": "Average", "label": "Average" } ],
+          [ "...", { "stat": "p50", "label": "p50" } ],
+          [ "...", { "stat": "p95", "label": "p95" } ],
+          [ "...", { "stat": "p99", "label": "p99" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "⏱️ ALB - Response Time Percentiles",
+        "period": 60,
+        "yAxis": {
+          "left": {
+            "showUnits": false,
+            "label": "Seconds"
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "Target < 0.5s",
+              "value": 0.5,
+              "fill": "above",
+              "color": "#FF9900"
+            },
+            {
+              "label": "Critical > 2s",
+              "value": 2.0,
+              "fill": "above",
+              "color": "#D13212"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 7,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": ${ecs_service_names},
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "🐳 ECS - CPU Utilization by Service",
+        "period": 60,
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 100,
+            "showUnits": false,
+            "label": "Percent"
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "Warning > 80%",
+              "value": 80,
+              "fill": "above",
+              "color": "#FF9900"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 7,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": ${ecs_service_names},
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "💾 ECS - Memory Utilization by Service",
+        "period": 60,
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 100,
+            "showUnits": false,
+            "label": "Percent"
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "Critical > 85%",
+              "value": 85,
+              "fill": "above",
+              "color": "#D13212"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 13,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "AWS/RDS", "CPUUtilization", { "stat": "Average", "label": "CPU %" } ],
+          [ ".", "DatabaseConnections", { "stat": "Average", "label": "Connections", "yAxis": "right" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "🗄️ RDS - CPU & Connections",
+        "period": 60
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 13,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "AWS/RDS", "ReadLatency", { "stat": "Average", "label": "Read Latency" } ],
+          [ ".", "WriteLatency", { "stat": "Average", "label": "Write Latency" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "⚡ RDS - Read/Write Latency",
+        "period": 60,
+        "yAxis": {
+          "left": {
+            "showUnits": false,
+            "label": "Seconds"
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 13,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "AWS/RDS", "FreeableMemory", { "stat": "Average" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "💿 RDS - Freeable Memory",
+        "period": 60,
+        "yAxis": {
+          "left": {
+            "showUnits": false
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "Low Memory < 512MB",
+              "value": 536870912,
+              "fill": "below",
+              "color": "#D13212"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 19,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": ${dynamodb_table_names},
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "📊 DynamoDB - Consumed Read Capacity",
+        "period": 60
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 19,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": ${dynamodb_table_names},
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "✍️ DynamoDB - Consumed Write Capacity",
+        "period": 60
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 25,
+      "width": 24,
+      "height": 6,
+      "properties": {
+        "query": "SOURCE ${log_group_names}\n| fields @timestamp, @message\n| filter @message like /ERROR/\n| sort @timestamp desc\n| limit 100",
+        "region": "${region}",
+        "stacked": false,
+        "title": "🚨 Recent Application Errors",
+        "view": "table"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 31,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "Senas/Business", "ExercisesCompleted", { "stat": "Sum", "label": "Exercises" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "🎯 Business - Exercises Completed",
+        "period": 300
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 31,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "Senas/Business", "XPEarned", { "stat": "Sum", "label": "Total XP" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "⭐ Business - XP Earned",
+        "period": 300
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 31,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "Senas/Application", "ApplicationErrors", { "stat": "Sum", "label": "Errors" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "${region}",
+        "title": "❗ Application - Error Count",
+        "period": 300,
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "High Error Rate > 50/5min",
+              "value": 50,
+              "fill": "above",
+              "color": "#D13212"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

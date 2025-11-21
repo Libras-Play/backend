@@ -1,0 +1,196 @@
+# =============================================================================
+# Terraform Variables - Example Configuration
+# =============================================================================
+#
+# INSTRUCCIONES DE USO SEGURO:
+# 
+# 1. DESARROLLO LOCAL:
+#    - Copiar este archivo a terraform.tfvars
+#    - Actualizar los valores según tu ambiente
+#    - NUNCA commitear terraform.tfvars a Git (está en .gitignore)
+#
+# 2. CI/CD (RECOMENDADO):
+#    - NO usar terraform.tfvars en CI/CD
+#    - Usar variables de entorno TF_VAR_* 
+#    - Configurar GitHub Secrets para valores sensibles
+#    - Usar OIDC para autenticación AWS (sin credenciales estáticas)
+#
+# 3. BACKEND CONFIGURATION:
+#    - Configurar S3 backend via: terraform init -backend-config=backend.hcl
+#    - Ver: scripts/setup_backend.sh para configuración automática
+#    - Usar workspace para múltiples ambientes: terraform workspace select dev|staging|prod
+#
+# 4. SECRETOS Y CREDENCIALES:
+#    - NO poner passwords, keys, o tokens aquí
+#    - Usar AWS Secrets Manager o SSM Parameter Store
+#    - Referencias: data.aws_secretsmanager_secret_version.db_password.secret_string
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# General Configuration
+# -----------------------------------------------------------------------------
+
+project_name = "aplicacion-senas"
+environment  = "dev"  # Cambiar a "prod" para producción
+owner        = "ERIKO"
+cost_center  = "UNASP"
+
+# -----------------------------------------------------------------------------
+# AWS Configuration
+# -----------------------------------------------------------------------------
+
+aws_region  = "us-east-1"
+aws_profile = "default"  # Solo para desarrollo local
+
+# -----------------------------------------------------------------------------
+# VPC Configuration
+# -----------------------------------------------------------------------------
+
+vpc_cidr           = "10.0.0.0/16"
+availability_zones = ["us-east-1a", "us-east-1b", "us-east-1c"]
+
+# NAT Gateway (cost saving para dev)
+enable_nat_gateway = true
+single_nat_gateway = true  # Cambiar a false en producción para HA
+
+# -----------------------------------------------------------------------------
+# ECS Configuration
+# -----------------------------------------------------------------------------
+
+# Task size (dev: small, prod: large)
+ecs_task_cpu    = 256   # 0.25 vCPU
+ecs_task_memory = 512   # 512 MB
+
+# Scaling (dev: minimal, prod: auto-scaling)
+ecs_desired_count    = 1
+ecs_autoscaling_min  = 1
+ecs_autoscaling_max  = 4
+
+# Container images (actualizar después de build en ECR)
+container_images = {
+  content_service = "aplicacion-senas-content-service:latest"
+  user_service    = "aplicacion-senas-user-service:latest"
+  ml_service      = "aplicacion-senas-ml-service:latest"
+}
+
+# -----------------------------------------------------------------------------
+# RDS Aurora Configuration
+# -----------------------------------------------------------------------------
+
+rds_instance_class = "db.serverless"  # Aurora Serverless v2
+rds_engine_version = "15.4"           # PostgreSQL 15.4
+
+rds_database_name   = "content_db"
+rds_master_username = "postgres"
+
+# IMPORTANTE: NO poner password aquí
+# Usar AWS Secrets Manager o variable de entorno TF_VAR_rds_master_password
+# rds_master_password = ""  # Dejar vacío, se genera automáticamente
+
+rds_backup_retention_days = 7     # dev: 7 días, prod: 30 días
+rds_skip_final_snapshot   = true  # dev: true, prod: false
+
+# -----------------------------------------------------------------------------
+# DynamoDB Configuration
+# -----------------------------------------------------------------------------
+
+dynamodb_tables = {
+  UserData = {
+    hash_key       = "user_id"
+    range_key      = ""
+    billing_mode   = "PAY_PER_REQUEST"  # On-demand pricing
+    read_capacity  = 0
+    write_capacity = 0
+  }
+  UserProgress = {
+    hash_key       = "user_id"
+    range_key      = "exercise_id"
+    billing_mode   = "PAY_PER_REQUEST"
+    read_capacity  = 0
+    write_capacity = 0
+  }
+  AiSessions = {
+    hash_key       = "session_id"
+    range_key      = ""
+    billing_mode   = "PAY_PER_REQUEST"
+    read_capacity  = 0
+    write_capacity = 0
+  }
+}
+
+# -----------------------------------------------------------------------------
+# S3 Configuration
+# -----------------------------------------------------------------------------
+
+s3_buckets = [
+  "content-assets",
+  "user-uploads",
+  "ml-models",
+  "video-processing"
+]
+
+s3_enable_versioning         = true
+s3_lifecycle_expiration_days = 90  # 0 = disabled
+
+# -----------------------------------------------------------------------------
+# Cognito Configuration
+# -----------------------------------------------------------------------------
+
+cognito_user_pool_name        = "aplicacion-senas-users"
+cognito_password_minimum_length = 8
+cognito_mfa_configuration     = "OPTIONAL"  # OFF, OPTIONAL, ON
+
+# -----------------------------------------------------------------------------
+# SQS Configuration
+# -----------------------------------------------------------------------------
+
+sqs_queues = {
+  video-processing = {
+    visibility_timeout_seconds = 300     # 5 minutes
+    message_retention_seconds  = 345600  # 4 days
+    max_message_size          = 262144   # 256 KB
+    receive_wait_time_seconds  = 20      # Long polling
+  }
+  ml-inference = {
+    visibility_timeout_seconds = 600     # 10 minutes
+    message_retention_seconds  = 345600
+    max_message_size          = 262144
+    receive_wait_time_seconds  = 20
+  }
+}
+
+# -----------------------------------------------------------------------------
+# SNS Configuration
+# -----------------------------------------------------------------------------
+
+sns_topics = [
+  "achievement-notifications",
+  "level-completion",
+  "system-alerts"
+]
+
+# -----------------------------------------------------------------------------
+# Monitoring & Logging
+# -----------------------------------------------------------------------------
+
+enable_cloudwatch_logs     = true
+log_retention_days         = 7   # dev: 7 días, prod: 30 días
+enable_container_insights  = true
+
+# -----------------------------------------------------------------------------
+# Security
+# -----------------------------------------------------------------------------
+
+# IMPORTANTE: Restringir en producción
+allowed_cidr_blocks = ["0.0.0.0/0"]  # Permite todo (solo para dev)
+# allowed_cidr_blocks = ["203.0.113.0/24"]  # Ejemplo: IP específica
+
+enable_deletion_protection = false  # dev: false, prod: true
+
+# -----------------------------------------------------------------------------
+# Cost Optimization
+# -----------------------------------------------------------------------------
+
+enable_autoscaling     = true
+enable_spot_instances  = false  # dev: true (cost saving), prod: false (stability)

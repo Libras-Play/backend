@@ -1,0 +1,402 @@
+name: Nightly Security Scans
+
+on:
+  schedule:
+    # Run comprehensive security scans at 3 AM UTC every night
+    - cron: '0 3 * * *'
+    # Weekly deep scan on Sundays at 4 AM UTC
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+    inputs:
+      scan_depth:
+        description: 'Depth of security scanning'
+        type: choice
+        options:
+          - standard
+          - deep
+          - full
+        default: 'standard'
+      include_experimental:
+        description: 'Include experimental security checks'
+        type: boolean
+        default: false
+
+env:
+  PYTHON_VERSION: '3.11'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  determine-scope:
+    name: Determine Scan Scope
+    runs-on: ubuntu-latest
+    outputs:
+      scan-depth: ${{ steps.scope.outputs.scan-depth }}
+      include-experimental: ${{ steps.scope.outputs.include-experimental }}
+      services: ${{ steps.scope.outputs.services }}
+    
+    steps:
+      - name: Determine scan scope
+        id: scope
+        run: |
+          # Determine scan depth
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            if [ "${{ github.event.schedule }}" = "0 4 * * 0" ]; then
+              echo "scan-depth=full" >> $GITHUB_OUTPUT
+              echo "include-experimental=true" >> $GITHUB_OUTPUT
+            else
+              echo "scan-depth=deep" >> $GITHUB_OUTPUT  
+              echo "include-experimental=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "scan-depth=${{ github.event.inputs.scan_depth }}" >> $GITHUB_OUTPUT
+            echo "include-experimental=${{ github.event.inputs.include_experimental }}" >> $GITHUB_OUTPUT
+          fi
+          
+          # Services to scan
+          echo "services=[\"content-service\", \"user-service\", \"ml-service\"]" >> $GITHUB_OUTPUT
+          
+          echo "## 🔍 Nightly Security Scan Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scan Depth**: $(echo '${{ steps.scope.outputs.scan-depth }}' | tr '[:lower:]' '[:upper:]')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Experimental Checks**: ${{ steps.scope.outputs.include-experimental }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+
+  codeql-nightly:
+    name: CodeQL Nightly Analysis
+    needs: determine-scope
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['python', 'javascript', 'typescript']
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: ${{ needs.determine-scope.outputs.include-experimental == 'true' && '+security-extended,security-and-quality,code-scanning,security-experimental' || '+security-extended,security-and-quality' }}
+          config: |
+            paths:
+              - services/
+              - infra/
+            paths-ignore:
+              - "**/*.md"
+              - "**/*.txt"
+              - "**/test/**"
+              - "**/tests/**"
+              - "**/__pycache__/**"
+              - "**/node_modules/**"
+      
+      - name: Set up Python (for Python analysis)
+        if: matrix.language == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install Python dependencies
+        if: matrix.language == 'python'
+        run: |
+          python -m pip install --upgrade pip
+          find services -name requirements.txt -exec pip install -r {} \;
+      
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+      
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}/nightly"
+          upload-database: ${{ needs.determine-scope.outputs.scan-depth == 'full' }}
+
+  trivy-comprehensive:
+    name: Trivy Comprehensive Scan
+    needs: determine-scope
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJSON(needs.determine-scope.outputs.services) }}
+        scan-type: [filesystem, dependency, container, secrets]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        if: matrix.scan-type == 'dependency' || matrix.scan-type == 'container'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        if: matrix.scan-type == 'dependency' || matrix.scan-type == 'container'
+        working-directory: services/api/${{ matrix.service }}
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+      
+      - name: Set up Docker Buildx
+        if: matrix.scan-type == 'container'
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image
+        if: matrix.scan-type == 'container'
+        uses: docker/build-push-action@v5
+        with:
+          context: services/api/${{ matrix.service }}
+          tags: ${{ matrix.service }}:nightly-scan
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Run Trivy Filesystem Scan
+        if: matrix.scan-type == 'filesystem'
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: 'services/api/${{ matrix.service }}'
+          format: 'sarif'
+          output: 'trivy-fs-${{ matrix.service }}-nightly.sarif'
+          severity: 'LOW,MEDIUM,HIGH,CRITICAL'
+          exit-code: '0'
+          scanners: 'vuln,misconfig'
+      
+      - name: Run Trivy Dependency Scan
+        if: matrix.scan-type == 'dependency'
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: 'services/api/${{ matrix.service }}'
+          format: 'sarif'
+          output: 'trivy-deps-${{ matrix.service }}-nightly.sarif'
+          severity: 'MEDIUM,HIGH,CRITICAL'
+          exit-code: '0'
+          scanners: 'vuln'
+      
+      - name: Run Trivy Container Scan
+        if: matrix.scan-type == 'container'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ matrix.service }}:nightly-scan'
+          format: 'sarif'
+          output: 'trivy-container-${{ matrix.service }}-nightly.sarif'
+          severity: 'MEDIUM,HIGH,CRITICAL'
+          exit-code: '0'
+      
+      - name: Run Trivy Secret Scan
+        if: matrix.scan-type == 'secrets'
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: 'services/api/${{ matrix.service }}'
+          format: 'sarif'
+          output: 'trivy-secrets-${{ matrix.service }}-nightly.sarif'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '0'
+          scanners: 'secret'
+      
+      - name: Upload Trivy Results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-${{ matrix.scan-type }}-${{ matrix.service }}-nightly.sarif'
+          category: 'trivy-${{ matrix.scan-type }}-${{ matrix.service }}-nightly'
+      
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-trivy-${{ matrix.scan-type }}-${{ matrix.service }}
+          path: 'trivy-${{ matrix.scan-type }}-${{ matrix.service }}-nightly.sarif'
+          retention-days: 90
+
+  dependency-review:
+    name: Dependency Review & License Check
+    needs: determine-scope
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJSON(needs.determine-scope.outputs.services) }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit pip-licenses safety
+      
+      - name: Run pip-audit
+        working-directory: services/api/${{ matrix.service }}
+        run: |
+          pip-audit --format=json --output=pip-audit-${{ matrix.service }}.json || true
+          pip-audit --format=cyclonedx-json --output=sbom-${{ matrix.service }}.json || true
+      
+      - name: Generate license report
+        working-directory: services/api/${{ matrix.service }}
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+            pip-licenses --format=json --output-file=licenses-${{ matrix.service }}.json || true
+          fi
+      
+      - name: Run Safety scan
+        working-directory: services/api/${{ matrix.service }}
+        run: |
+          safety check --json --output safety-${{ matrix.service }}.json || true
+      
+      - name: Upload dependency artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-dependency-${{ matrix.service }}
+          path: |
+            services/api/${{ matrix.service }}/pip-audit-${{ matrix.service }}.json
+            services/api/${{ matrix.service }}/sbom-${{ matrix.service }}.json
+            services/api/${{ matrix.service }}/licenses-${{ matrix.service }}.json
+            services/api/${{ matrix.service }}/safety-${{ matrix.service }}.json
+          retention-days: 90
+
+  infrastructure-security:
+    name: Infrastructure Security Scan
+    needs: determine-scope
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Run Trivy Infrastructure Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: 'infra/'
+          format: 'sarif'
+          output: 'trivy-infra-nightly.sarif'
+          severity: 'MEDIUM,HIGH,CRITICAL'
+          exit-code: '0'
+          scanners: 'vuln,misconfig,secret'
+      
+      - name: Upload Infrastructure Results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-infra-nightly.sarif'
+          category: 'trivy-infrastructure-nightly'
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.6.0'
+      
+      - name: Terraform Security Scan (TFSec)
+        run: |
+          # Install tfsec
+          curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
+          
+          # Run tfsec on all terraform directories
+          find infra -name "*.tf" -type f -exec dirname {} \; | sort -u | while read dir; do
+            echo "Scanning $dir..."
+            tfsec "$dir" --format sarif --out "tfsec-$(basename $dir).sarif" || true
+          done
+      
+      - name: Upload TFSec Results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'tfsec-*.sarif'
+          category: 'tfsec-infrastructure'
+
+  security-summary:
+    name: Security Summary & Reporting
+    needs: [determine-scope, codeql-nightly, trivy-comprehensive, dependency-review, infrastructure-security]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Generate Security Report
+        run: |
+          echo "# 🌙 Nightly Security Scan Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Depth**: ${{ needs.determine-scope.outputs.scan-depth }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Experimental Checks**: ${{ needs.determine-scope.outputs.include-experimental }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 📊 Scan Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| CodeQL Analysis | ${{ needs.codeql-nightly.result }} | Static code analysis for security vulnerabilities |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trivy Scanning | ${{ needs.trivy-comprehensive.result }} | Container and filesystem vulnerability scanning |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Review | ${{ needs.dependency-review.result }} | Third-party package security and license compliance |" >> $GITHUB_STEP_SUMMARY
+          echo "| Infrastructure Security | ${{ needs.infrastructure-security.result }} | Terraform and cloud configuration security |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔍 Security Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Static Analysis**: CodeQL with security-focused queries" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Dynamic Analysis**: Container and filesystem scanning" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Dependency Analysis**: Vulnerability and license compliance" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Infrastructure Analysis**: Cloud security configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Secret Detection**: Embedded credentials and API keys" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📈 Next Actions" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Review Results**: Check the Security tab for detailed findings" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Download Reports**: Artifacts contain comprehensive security reports" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Address Issues**: Prioritize HIGH and CRITICAL severity findings" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Track Progress**: Monitor security posture improvements over time" >> $GITHUB_STEP_SUMMARY
+          
+          # Calculate overall security health
+          failed_jobs=0
+          total_jobs=4
+          
+          if [ "${{ needs.codeql-nightly.result }}" != "success" ]; then
+            failed_jobs=$((failed_jobs + 1))
+          fi
+          if [ "${{ needs.trivy-comprehensive.result }}" != "success" ]; then
+            failed_jobs=$((failed_jobs + 1))
+          fi
+          if [ "${{ needs.dependency-review.result }}" != "success" ]; then
+            failed_jobs=$((failed_jobs + 1))
+          fi
+          if [ "${{ needs.infrastructure-security.result }}" != "success" ]; then
+            failed_jobs=$((failed_jobs + 1))
+          fi
+          
+          success_rate=$(( (total_jobs - failed_jobs) * 100 / total_jobs ))
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎯 Security Health Score" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Overall Success Rate**: ${success_rate}%" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $success_rate -eq 100 ]; then
+            echo "🟢 **Status**: EXCELLENT - All security scans completed successfully" >> $GITHUB_STEP_SUMMARY
+          elif [ $success_rate -ge 75 ]; then
+            echo "🟡 **Status**: GOOD - Most security scans completed, minor issues detected" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🔴 **Status**: ATTENTION REQUIRED - Multiple security scan failures detected" >> $GITHUB_STEP_SUMMARY
+          fi

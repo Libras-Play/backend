@@ -1,0 +1,706 @@
+name: CD - Secure OIDC Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      force_deploy:
+        description: 'Force deployment even if no changes detected'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.11'
+  TERRAFORM_VERSION: '1.6.0'
+
+# OIDC requires these permissions
+permissions:
+  id-token: write      # Required for OIDC token generation
+  contents: read       # Required for repository checkout  
+  security-events: write # Required for security scanning uploads
+  pull-requests: write # Required for PR comments
+  actions: read        # Required for workflow metadata
+
+jobs:
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      content-service: ${{ steps.filter.outputs.content-service }}
+      user-service: ${{ steps.filter.outputs.user-service }}
+      ml-service: ${{ steps.filter.outputs.ml-service }}
+      infrastructure: ${{ steps.filter.outputs.infrastructure }}
+      environment: ${{ steps.set-env.outputs.environment }}
+      force-deploy: ${{ steps.set-env.outputs.force-deploy }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            content-service:
+              - 'services/api/content-service/**'
+            user-service:
+              - 'services/api/user-service/**'
+            ml-service:
+              - 'services/api/ml-service/**'
+            infrastructure:
+              - 'infra/terraform/**'
+      
+      - name: Determine Environment and Force Deploy
+        id: set-env
+        run: |
+          if [ "${{ github.event.inputs.environment }}" != "" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "force-deploy=${{ github.event.inputs.force_deploy }}" >> $GITHUB_OUTPUT
+          else
+            case "${{ github.ref_name }}" in
+              main)
+                echo "environment=production" >> $GITHUB_OUTPUT
+                ;;
+              staging)
+                echo "environment=staging" >> $GITHUB_OUTPUT
+                ;;
+              *)
+                echo "environment=staging" >> $GITHUB_OUTPUT
+                ;;
+            esac
+            echo "force-deploy=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Environment Summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: **${{ steps.set-env.outputs.environment }}**" >> $GITHUB_STEP_SUMMARY
+          echo "Force Deploy: ${{ steps.set-env.outputs.force-deploy }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Changed Services:" >> $GITHUB_STEP_SUMMARY
+          echo "- Content Service: ${{ steps.filter.outputs.content-service }}" >> $GITHUB_STEP_SUMMARY
+          echo "- User Service: ${{ steps.filter.outputs.user-service }}" >> $GITHUB_STEP_SUMMARY  
+          echo "- ML Service: ${{ steps.filter.outputs.ml-service }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Infrastructure: ${{ steps.filter.outputs.infrastructure }}" >> $GITHUB_STEP_SUMMARY
+
+  # ==================== BUILD AND PUSH ====================
+  build-and-push-content-service:
+    name: Build & Push - Content Service
+    needs: detect-changes
+    if: needs.detect-changes.outputs.content-service == 'true' || needs.detect-changes.outputs.force-deploy == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api/content-service
+    outputs:
+      image-uri: ${{ steps.build-push.outputs.image-uri }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: GitHubActions-ContentService-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.ECR_REPO_CONTENT }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Build and push Docker image
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context: services/api/content-service
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+      
+      - name: Run Trivy Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.ECR_REPO_CONTENT }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy Results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+      
+      - name: Set image URI output
+        run: echo "image-uri=${{ secrets.ECR_REPO_CONTENT }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+
+  build-and-push-user-service:
+    name: Build & Push - User Service
+    needs: detect-changes
+    if: needs.detect-changes.outputs.user-service == 'true' || needs.detect-changes.outputs.force-deploy == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api/user-service
+    outputs:
+      image-uri: ${{ steps.build-push.outputs.image-uri }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: GitHubActions-UserService-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.ECR_REPO_USER }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Build and push Docker image
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context: services/api/user-service
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+      
+      - name: Run Trivy Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.ECR_REPO_USER }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy Results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+      
+      - name: Set image URI output
+        run: echo "image-uri=${{ secrets.ECR_REPO_USER }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+
+  build-and-push-ml-service:
+    name: Build & Push - ML Service
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ml-service == 'true' || needs.detect-changes.outputs.force-deploy == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api/ml-service
+    outputs:
+      image-uri: ${{ steps.build-push.outputs.image-uri }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: GitHubActions-MLService-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.ECR_REPO_ML }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Build and push Docker image
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context: services/api/ml-service
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+      
+      - name: Run Trivy Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.ECR_REPO_ML }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy Results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+      
+      - name: Set image URI output
+        run: echo "image-uri=${{ secrets.ECR_REPO_ML }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+
+  # ==================== DEPLOY TO ECS ====================
+  deploy-ecs-content-service:
+    name: Deploy - Content Service to ECS
+    needs: [detect-changes, build-and-push-content-service]
+    if: needs.build-and-push-content-service.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.detect-changes.outputs.environment }}
+      url: ${{ vars.ALB_URL }}/content/health
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: GitHubActions-DeployContent-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+      
+      - name: Get current task definition
+        id: get-task-def
+        run: |
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition content-service-${{ needs.detect-changes.outputs.environment }} \
+            --query 'taskDefinition' \
+            --output json)
+          
+          echo "previous-task-def=$(echo $TASK_DEF | jq -r '.family + ":" + (.revision | tostring)')" >> $GITHUB_OUTPUT
+          
+          # Remove fields that can't be used in new task definition
+          NEW_TASK_DEF=$(echo $TASK_DEF | jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)')
+          
+          echo "$NEW_TASK_DEF" > task-definition.json
+      
+      - name: Render new task definition
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: content-service
+          image: ${{ needs.build-and-push-content-service.outputs.image-uri }}
+      
+      - name: Deploy to Amazon ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          service: content-service-${{ needs.detect-changes.outputs.environment }}
+          cluster: librasplay-${{ needs.detect-changes.outputs.environment }}
+          wait-for-service-stability: true
+      
+      - name: Health Check
+        run: |
+          echo "Waiting for service to be healthy..."
+          sleep 30
+          
+          HEALTH_URL="${{ vars.ALB_URL }}/content/health"
+          
+          for i in {1..10}; do
+            if curl -f "$HEALTH_URL"; then
+              echo "✅ Health check passed!"
+              echo "health-status=success" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "⏳ Health check attempt $i failed, retrying..."
+            sleep 15
+          done
+          
+          echo "❌ Health check failed after 10 attempts"
+          echo "health-status=failure" >> $GITHUB_OUTPUT
+          exit 1
+      
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "🔄 Rolling back to previous task definition..."
+          aws ecs update-service \
+            --cluster librasplay-${{ needs.detect-changes.outputs.environment }} \
+            --service content-service-${{ needs.detect-changes.outputs.environment }} \
+            --task-definition ${{ steps.get-task-def.outputs.previous-task-def }} \
+            --force-new-deployment
+
+  deploy-ecs-user-service:
+    name: Deploy - User Service to ECS
+    needs: [detect-changes, build-and-push-user-service]
+    if: needs.build-and-push-user-service.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.detect-changes.outputs.environment }}
+      url: ${{ vars.ALB_URL }}/user/health
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: GitHubActions-DeployUser-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+      
+      - name: Get current task definition
+        id: get-task-def
+        run: |
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition user-service-${{ needs.detect-changes.outputs.environment }} \
+            --query 'taskDefinition' \
+            --output json)
+          
+          echo "previous-task-def=$(echo $TASK_DEF | jq -r '.family + ":" + (.revision | tostring)')" >> $GITHUB_OUTPUT
+          
+          # Remove fields that can't be used in new task definition
+          NEW_TASK_DEF=$(echo $TASK_DEF | jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)')
+          
+          echo "$NEW_TASK_DEF" > task-definition.json
+      
+      - name: Render new task definition
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: user-service
+          image: ${{ needs.build-and-push-user-service.outputs.image-uri }}
+      
+      - name: Deploy to Amazon ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          service: user-service-${{ needs.detect-changes.outputs.environment }}
+          cluster: librasplay-${{ needs.detect-changes.outputs.environment }}
+          wait-for-service-stability: true
+      
+      - name: Health Check
+        run: |
+          echo "Waiting for service to be healthy..."
+          sleep 30
+          
+          HEALTH_URL="${{ vars.ALB_URL }}/user/health"
+          
+          for i in {1..10}; do
+            if curl -f "$HEALTH_URL"; then
+              echo "✅ Health check passed!"
+              echo "health-status=success" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "⏳ Health check attempt $i failed, retrying..."
+            sleep 15
+          done
+          
+          echo "❌ Health check failed after 10 attempts"
+          echo "health-status=failure" >> $GITHUB_OUTPUT
+          exit 1
+      
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "🔄 Rolling back to previous task definition..."
+          aws ecs update-service \
+            --cluster librasplay-${{ needs.detect-changes.outputs.environment }} \
+            --service user-service-${{ needs.detect-changes.outputs.environment }} \
+            --task-definition ${{ steps.get-task-def.outputs.previous-task-def }} \
+            --force-new-deployment
+
+  deploy-ecs-ml-service:
+    name: Deploy - ML Service to ECS
+    needs: [detect-changes, build-and-push-ml-service]
+    if: needs.build-and-push-ml-service.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.detect-changes.outputs.environment }}
+      url: ${{ vars.ALB_URL }}/ml/health
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: GitHubActions-DeployML-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+      
+      - name: Get current task definition
+        id: get-task-def
+        run: |
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition ml-service-${{ needs.detect-changes.outputs.environment }} \
+            --query 'taskDefinition' \
+            --output json)
+          
+          echo "previous-task-def=$(echo $TASK_DEF | jq -r '.family + ":" + (.revision | tostring)')" >> $GITHUB_OUTPUT
+          
+          # Remove fields that can't be used in new task definition
+          NEW_TASK_DEF=$(echo $TASK_DEF | jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)')
+          
+          echo "$NEW_TASK_DEF" > task-definition.json
+      
+      - name: Render new task definition
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ml-service
+          image: ${{ needs.build-and-push-ml-service.outputs.image-uri }}
+      
+      - name: Deploy to Amazon ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          service: ml-service-${{ needs.detect-changes.outputs.environment }}
+          cluster: librasplay-${{ needs.detect-changes.outputs.environment }}
+          wait-for-service-stability: true
+      
+      - name: Health Check
+        run: |
+          echo "Waiting for service to be healthy..."
+          sleep 30
+          
+          HEALTH_URL="${{ vars.ALB_URL }}/ml/health"
+          
+          for i in {1..10}; do
+            if curl -f "$HEALTH_URL"; then
+              echo "✅ Health check passed!"
+              echo "health-status=success" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "⏳ Health check attempt $i failed, retrying..."
+            sleep 15
+          done
+          
+          echo "❌ Health check failed after 10 attempts"
+          echo "health-status=failure" >> $GITHUB_OUTPUT
+          exit 1
+      
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "🔄 Rolling back to previous task definition..."
+          aws ecs update-service \
+            --cluster librasplay-${{ needs.detect-changes.outputs.environment }} \
+            --service ml-service-${{ needs.detect-changes.outputs.environment }} \
+            --task-definition ${{ steps.get-task-def.outputs.previous-task-def }} \
+            --force-new-deployment
+
+  # ==================== TERRAFORM INFRASTRUCTURE ====================
+  terraform-plan:
+    name: Terraform Plan
+    needs: detect-changes
+    if: needs.detect-changes.outputs.infrastructure == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform/environments/${{ needs.detect-changes.outputs.environment == 'production' && 'prod' || 'dev' }}
+    outputs:
+      plan-exitcode: ${{ steps.plan.outputs.exitcode }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_INFRA_ROLE_ARN }}
+          role-session-name: GitHubActions-TerraformPlan-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Terraform Init
+        run: terraform init
+      
+      - name: Terraform Plan
+        id: plan
+        env:
+          TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
+        run: |
+          terraform plan -detailed-exitcode -no-color -out=tfplan || echo "exitcode=$?" >> $GITHUB_OUTPUT
+      
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: infra/terraform/environments/${{ needs.detect-changes.outputs.environment == 'production' && 'prod' || 'dev' }}/tfplan
+          retention-days: 5
+      
+      - name: Comment Plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `### 🏗️ Terraform Plan - OIDC Secured
+            
+            **Environment:** \`${{ needs.detect-changes.outputs.environment }}\`
+            **Workspace:** \`${{ needs.detect-changes.outputs.environment == 'production' && 'prod' || 'dev' }}\`
+            **Authentication:** ✅ OIDC Role Assumption
+            
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`terraform
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+            
+            </details>
+            
+            **Security:** Infrastructure changes use separate OIDC role with restricted permissions.`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+  terraform-apply:
+    name: Terraform Apply
+    needs: [detect-changes, terraform-plan]
+    if: |
+      needs.detect-changes.outputs.infrastructure == 'true' &&
+      needs.terraform-plan.outputs.plan-exitcode == '2'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.detect-changes.outputs.environment }}-infrastructure
+    defaults:
+      run:
+        working-directory: infra/terraform/environments/${{ needs.detect-changes.outputs.environment == 'production' && 'prod' || 'dev' }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_INFRA_ROLE_ARN }}
+          role-session-name: GitHubActions-TerraformApply-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Terraform Init
+        run: terraform init
+      
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: infra/terraform/environments/${{ needs.detect-changes.outputs.environment == 'production' && 'prod' || 'dev' }}
+      
+      - name: Terraform Apply
+        env:
+          TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
+        run: terraform apply -auto-approve tfplan
+
+  # ==================== DEPLOYMENT SUMMARY ====================
+  deployment-summary:
+    name: 🚀 Deployment Summary
+    needs: 
+      - detect-changes
+      - deploy-ecs-content-service
+      - deploy-ecs-user-service
+      - deploy-ecs-ml-service
+      - terraform-apply
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Generate Deployment Summary
+        run: |
+          echo "## 🚀 Secure OIDC Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** \`${{ needs.detect-changes.outputs.environment }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Authentication:** ✅ OIDC (No long-lived credentials)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📦 Service Deployments" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Status | Health Check |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|--------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Content Service | ${{ needs.deploy-ecs-content-service.result }} | ${{ vars.ALB_URL }}/content/health |" >> $GITHUB_STEP_SUMMARY
+          echo "| User Service | ${{ needs.deploy-ecs-user-service.result }} | ${{ vars.ALB_URL }}/user/health |" >> $GITHUB_STEP_SUMMARY
+          echo "| ML Service | ${{ needs.deploy-ecs-ml-service.result }} | ${{ vars.ALB_URL }}/ml/health |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏗️ Infrastructure" >> $GITHUB_STEP_SUMMARY
+          echo "- Terraform Apply: ${{ needs.terraform-apply.result }}" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔒 Security Features" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ OIDC Authentication (no static keys)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Container security scanning (Trivy)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Automated rollback on failure" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Health checks with retry logic" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Environment-specific deployments" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Separate infrastructure role" >> $GITHUB_STEP_SUMMARY

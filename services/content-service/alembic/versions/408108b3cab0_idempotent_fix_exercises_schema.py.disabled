@@ -1,0 +1,158 @@
+"""idempotent_fix_exercises_schema
+
+Revision ID: 408108b3cab0
+Revises: 91d3b4129f20
+Create Date: 2025-01-18 18:38:28.025066
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision: str = '408108b3cab0'
+down_revision: Union[str, None] = 'fc5e0716f0cc'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    # MIGRACIÓN IDEMPOTENTE - revisa si existe antes de aplicar
+    conn = op.get_bind()
+    
+    # 1. Verificar si topic_id ya existe
+    result = conn.execute(sa.text("""
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'exercises' AND column_name = 'topic_id'
+        )
+    """))
+    topic_id_exists = result.scalar()
+    
+    # 2. Verificar si level_id existe
+    result = conn.execute(sa.text("""
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'exercises' AND column_name = 'level_id'
+        )
+    """))
+    level_id_exists = result.scalar()
+    
+    # 3. Si level_id existe y topic_id NO existe, hacer migración
+    if level_id_exists and not topic_id_exists:
+        print("🔧 Migrando level_id → topic_id...")
+        
+        # Agregar topic_id (nullable por ahora)
+        op.add_column('exercises', sa.Column('topic_id', sa.Integer(), nullable=True))
+        
+        # Migrar datos: topic_id = levels.topic_id WHERE exercises.level_id = levels.id
+        conn.execute(sa.text("""
+            UPDATE exercises e
+            SET topic_id = l.topic_id
+            FROM levels l
+            WHERE e.level_id = l.id
+        """))
+        
+        # Hacer topic_id NOT NULL
+        op.alter_column('exercises', 'topic_id', nullable=False)
+        
+        # Crear Foreign Key
+        op.create_foreign_key(
+            'fk_exercises_topic_id',
+            'exercises', 'topics',
+            ['topic_id'], ['id'],
+            ondelete='CASCADE'
+        )
+        
+        # Eliminar level_id - Verificar si el constraint existe antes de drop
+        # Primero verificar si el constraint existe
+        result = conn.execute(sa.text("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.table_constraints
+                WHERE table_name = 'exercises' 
+                AND constraint_name = 'fk_exercises_level_id'
+            )
+        """))
+        fk_exists = result.scalar()
+        
+        if fk_exists:
+            op.drop_constraint('fk_exercises_level_id', 'exercises', type_='foreignkey')
+        
+        op.drop_column('exercises', 'level_id')
+        
+        print("✅ Migración level_id → topic_id completada")
+    elif topic_id_exists:
+        print("✅ topic_id ya existe, saltando migración")
+    
+    # 4. Verificar si difficulty existe
+    result = conn.execute(sa.text("""
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'exercises' AND column_name = 'difficulty'
+        )
+    """))
+    difficulty_exists = result.scalar()
+    
+    if not difficulty_exists:
+        print("🔧 Agregando columna difficulty...")
+        
+        # Verificar si el enum difficultylevel ya existe
+        result = conn.execute(sa.text("""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_type WHERE typname = 'difficultylevel'
+            )
+        """))
+        enum_exists = result.scalar()
+        
+        if enum_exists:
+            # El enum existe con valores viejos (BEGINNER, INTERMEDIATE, ADVANCED)
+            # Usaremos INTERMEDIATE que existe, luego cambiaremos
+            print("  Enum difficultylevel existe con valores viejos...")
+            
+            # Agregar columna usando INTERMEDIATE (valor viejo que existe)
+            conn.execute(sa.text("""
+                ALTER TABLE exercises 
+                ADD COLUMN IF NOT EXISTS difficulty difficultylevel DEFAULT 'INTERMEDIATE'::difficultylevel
+            """))
+            
+            # Hacer NOT NULL
+            conn.execute(sa.text("""
+                ALTER TABLE exercises 
+                ALTER COLUMN difficulty SET NOT NULL
+            """))
+            
+            print("  ✅ Columna difficulty agregada con valores viejos (se actualizará en próxima migración)")
+        else:
+            # Crear enum si no existe
+            conn.execute(sa.text("""
+                CREATE TYPE difficultylevel AS ENUM ('easy', 'medium', 'hard');
+            """))
+            
+            # Agregar columna (nullable)
+            op.add_column('exercises', 
+                sa.Column('difficulty', 
+                    sa.Enum('easy', 'medium', 'hard', name='difficultylevel'),
+                    nullable=True
+                )
+            )
+            
+            # Migrar valores - asignar 'medium' por defecto
+            conn.execute(sa.text("""
+                UPDATE exercises
+                SET difficulty = 'medium'::difficultylevel
+                WHERE difficulty IS NULL
+            """))
+            
+            # Hacer NOT NULL
+            op.alter_column('exercises', 'difficulty', nullable=False)
+            
+            print("✅ Columna difficulty agregada")
+    else:
+        print("✅ difficulty ya existe, saltando migración")
+
+
+def downgrade() -> None:
+    # No hacer downgrade - muy peligroso
+    pass

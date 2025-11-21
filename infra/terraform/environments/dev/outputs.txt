@@ -1,0 +1,28 @@
+alb_dns_name = "libras-play-dev-alb-1450968088.us-east-1.elb.amazonaws.com"
+cognito_user_pool_id = "us-east-1_PvKA8zuHt"
+dynamodb_tables = {
+  "ai-sessions" = "libras-play-dev-ai-sessions"
+  "user-data" = "libras-play-dev-user-data"
+  "user-progress" = "libras-play-dev-user-progress"
+}
+ecr_repositories = {
+  "content-service" = "019460294038.dkr.ecr.us-east-1.amazonaws.com/libras-play-dev-content-service"
+  "ml-service" = "019460294038.dkr.ecr.us-east-1.amazonaws.com/libras-play-dev-ml-service"
+  "user-service" = "019460294038.dkr.ecr.us-east-1.amazonaws.com/libras-play-dev-user-service"
+}
+s3_buckets = {
+  "content-assets" = "libras-play-dev-content-assets"
+  "ml-models" = "libras-play-dev-ml-models"
+  "user-uploads" = "libras-play-dev-user-uploads"
+  "video-processing" = "libras-play-dev-video-processing"
+}
+sns_topics = {
+  "achievement-notifications" = "arn:aws:sns:us-east-1:019460294038:libras-play-dev-achievement-notifications"
+  "level-completion" = "arn:aws:sns:us-east-1:019460294038:libras-play-dev-level-completion"
+  "system-alerts" = "arn:aws:sns:us-east-1:019460294038:libras-play-dev-system-alerts"
+}
+sqs_queues = {
+  "ml-inference" = "https://sqs.us-east-1.amazonaws.com/019460294038/libras-play-dev-ml-inference"
+  "video-processing" = "https://sqs.us-east-1.amazonaws.com/019460294038/libras-play-dev-video-processing"
+}
+vpc_id = "vpc-05c768525aae287af"

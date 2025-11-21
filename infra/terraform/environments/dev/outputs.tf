@@ -1,0 +1,9 @@
+output "vpc_id" { value = module.vpc.vpc_id }
+output "alb_dns_name" { value = module.ecs.alb_dns_name }
+output "ecr_repositories" { value = module.ecr.repository_urls }
+# output "rds_endpoint" { value = module.rds.cluster_endpoint }  # RDS comentado (free tier)
+output "dynamodb_tables" { value = module.dynamodb.table_names }
+output "s3_buckets" { value = module.s3.bucket_names }
+output "cognito_user_pool_id" { value = module.cognito.user_pool_id }
+output "sqs_queues" { value = module.sqs.queue_urls }
+output "sns_topics" { value = module.sns.topic_arns }

@@ -1,0 +1,53 @@
+# =============================================================================
+# Terraform Backend Configuration
+# =============================================================================
+# 
+# Este archivo configura el backend S3 para Terraform state management
+# Usar con: terraform init -backend-config=backend.hcl
+# 
+# IMPORTANTE: 
+# - NO commitear este archivo con valores reales
+# - Usar variables de entorno o GitHub Secrets en CI/CD
+# - Cada ambiente (dev/staging/prod) debe tener su propio state
+# 
+# =============================================================================
+
+# S3 Bucket para almacenar el state de Terraform
+bucket = "REPLACE_WITH_YOUR_STATE_BUCKET_NAME"
+
+# Key path para el state file (environment-specific)
+# Ejemplos:
+# - dev: "environments/dev/terraform.tfstate"
+# - staging: "environments/staging/terraform.tfstate"  
+# - prod: "environments/prod/terraform.tfstate"
+key = "environments/ENVIRONMENT/terraform.tfstate"
+
+# Región AWS donde está el bucket S3
+region = "us-east-1"
+
+# Encriptar el state file (SIEMPRE true)
+encrypt = true
+
+# DynamoDB table para state locking (previene corruption)
+dynamodb_table = "REPLACE_WITH_YOUR_LOCKS_TABLE_NAME"
+
+# Para CI/CD con OIDC (GitHub Actions)
+# role_arn = "arn:aws:iam::ACCOUNT_ID:role/GitHubActionsTerraformRole"
+
+# Para desarrollo local (opcional)
+# profile = "default"
+
+# =============================================================================
+# CONFIGURACIÓN POR AMBIENTE
+# =============================================================================
+#
+# DEV Environment:
+# key = "environments/dev/terraform.tfstate"
+# 
+# STAGING Environment:  
+# key = "environments/staging/terraform.tfstate"
+#
+# PRODUCTION Environment:
+# key = "environments/prod/terraform.tfstate"
+#
+# =============================================================================

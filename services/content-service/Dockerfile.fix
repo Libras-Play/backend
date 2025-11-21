@@ -1,0 +1,12 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Instalar dependencias
+RUN pip install --no-cache-dir asyncpg sqlalchemy
+
+# Copiar script
+COPY scripts/fix_migration_0009.py /app/fix_migration.py
+
+# Ejecutar
+CMD ["python", "fix_migration.py"]

@@ -1,0 +1,402 @@
+# Docker Compose Example for LibrasPlay
+# Copy this file to docker-compose.local.yml and customize as needed
+# This is for LOCAL DEVELOPMENT ONLY
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # POSTGRESQL DATABASE (for content-service and user-service)
+  # =============================================================================
+  postgres:
+    image: postgres:15
+    container_name: libras-play-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: localdev_password_123
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - libras-network
+
+  # =============================================================================
+  # DYNAMODB LOCAL (for user progress data)
+  # =============================================================================
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: libras-play-dynamodb
+    restart: unless-stopped
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "./data"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - dynamodb_data:/home/dynamodblocal/data
+    networks:
+      - libras-network
+
+  # =============================================================================
+  # CONTENT SERVICE
+  # =============================================================================
+  content-service:
+    build:
+      context: ./services/content-service
+      dockerfile: Dockerfile
+    container_name: libras-play-content-service
+    restart: unless-stopped
+    environment:
+      # Database Configuration
+      DATABASE_URL: postgresql+asyncpg://postgres:localdev_password_123@postgres:5432/content_db
+      
+      # Application Configuration
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      
+      # CORS Configuration
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173,http://localhost:8080
+      
+      # AWS Configuration (LocalStack)
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: localstack
+      AWS_SECRET_ACCESS_KEY: localstack
+      AWS_ENDPOINT_URL: http://localstack:4566
+      
+    ports:
+      - "8001:8001"
+    volumes:
+      # Mount source code for development (hot reloading)
+      - ./services/content-service/app:/app/app:ro
+      - ./services/content-service/alembic:/app/alembic:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/content/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - libras-network
+
+  # =============================================================================
+  # USER SERVICE  
+  # =============================================================================
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    container_name: libras-play-user-service
+    restart: unless-stopped
+    environment:
+      # Database Configuration
+      DATABASE_URL: postgresql+asyncpg://postgres:localdev_password_123@postgres:5432/user_db
+      
+      # AWS Configuration (LocalStack)
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: localstack
+      AWS_SECRET_ACCESS_KEY: localstack
+      AWS_ENDPOINT_URL: http://localstack:4566
+      DYNAMODB_ENDPOINT_URL: http://dynamodb-local:8000
+      
+      # DynamoDB Table Names
+      DYNAMODB_USER_PROGRESS_TABLE: user_progress_local
+      DYNAMODB_USER_LIVES_TABLE: user_lives_local
+      DYNAMODB_DAILY_MISSIONS_TABLE: daily_missions_local
+      DYNAMODB_USER_MISSIONS_TABLE: user_missions_local
+      DYNAMODB_USER_BADGES_TABLE: user_badges_local
+      DYNAMODB_TOPIC_PROGRESS_TABLE: topic_progress_local
+      DYNAMODB_STREAKS_TABLE: streaks_local
+      
+      # Service Integration
+      CONTENT_SERVICE_URL: http://content-service:8001
+      ADAPTIVE_SERVICE_URL: http://adaptive-service:8003
+      
+      # Application Configuration
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      
+      # Lives Configuration
+      MAX_LIVES: 5
+      LIFE_REFILL_MINUTES: 180
+      
+      # XP Configuration
+      XP_PER_LEVEL: 500
+      
+      # CORS Configuration
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173,http://localhost:8080
+      
+    ports:
+      - "8002:8002"
+    volumes:
+      # Mount source code for development (hot reloading)
+      - ./services/user-service/app:/app/app:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+      content-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/users/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - libras-network
+
+  # =============================================================================
+  # ML SERVICE
+  # =============================================================================  
+  ml-service:
+    build:
+      context: ./services/ml-service
+      dockerfile: Dockerfile
+    container_name: libras-play-ml-service
+    restart: unless-stopped
+    environment:
+      # AWS Configuration (LocalStack)
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: localstack
+      AWS_SECRET_ACCESS_KEY: localstack
+      AWS_ENDPOINT_URL: http://localstack:4566
+      
+      # S3 Configuration
+      S3_BUCKET_NAME: libras-play-videos-local
+      
+      # Model Configuration
+      MODEL_PATH: models/sign_language_model.h5
+      CONFIDENCE_THRESHOLD: 0.75
+      
+      # Application Configuration
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      
+      # CORS Configuration
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173,http://localhost:8080
+      
+    ports:
+      - "8003:8003"
+    volumes:
+      # Mount source code for development (hot reloading)
+      - ./services/ml-service/app:/app/app:ro
+      # Mount local models directory
+      - ./services/ml-service/models:/app/models:ro
+      # Mount temporary uploads directory
+      - ml_uploads:/tmp/ml-service
+    depends_on:
+      localstack:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/ml/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - libras-network
+
+  # =============================================================================
+  # ADAPTIVE LEARNING SERVICE (optional)
+  # =============================================================================
+  adaptive-service:
+    build:
+      context: ./services/adaptive-service
+      dockerfile: Dockerfile
+    container_name: libras-play-adaptive-service
+    restart: unless-stopped
+    environment:
+      # AWS Configuration (LocalStack)  
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: localstack
+      AWS_SECRET_ACCESS_KEY: localstack
+      AWS_ENDPOINT_URL: http://localstack:4566
+      DYNAMODB_ENDPOINT_URL: http://dynamodb-local:8000
+      
+      # Service Integration
+      CONTENT_SERVICE_URL: http://content-service:8001
+      USER_SERVICE_URL: http://user-service:8002
+      
+      # Application Configuration
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      
+    ports:
+      - "8004:8004"
+    volumes:
+      # Mount source code for development (hot reloading)
+      - ./services/adaptive-service/app:/app/app:ro
+    depends_on:
+      content-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+    networks:
+      - libras-network
+
+  # =============================================================================
+  # LOCALSTACK (AWS Services Emulation)
+  # =============================================================================
+  localstack:
+    image: localstack/localstack:3.0
+    container_name: libras-play-localstack
+    restart: unless-stopped
+    environment:
+      SERVICES: s3,secretsmanager,cognito-idp,sts
+      DEBUG: 1
+      DATA_DIR: /tmp/localstack/data
+      PERSISTENCE: 1
+      DOCKER_HOST: unix:///var/run/docker.sock
+    ports:
+      - "4566:4566"
+      - "4571:4571"
+    volumes:
+      - localstack_data:/tmp/localstack
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - libras-network
+
+  # =============================================================================
+  # NGINX REVERSE PROXY (optional, for single entry point)
+  # =============================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: libras-play-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - content-service
+      - user-service  
+      - ml-service
+    networks:
+      - libras-network
+
+  # =============================================================================
+  # REDIS (optional, for caching and sessions)
+  # =============================================================================  
+  redis:
+    image: redis:7-alpine
+    container_name: libras-play-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - libras-network
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  dynamodb_data:
+    driver: local
+  localstack_data:
+    driver: local
+  redis_data:
+    driver: local
+  ml_uploads:
+    driver: local
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+networks:
+  libras-network:
+    driver: bridge
+    name: libras-play-network
+
+# =============================================================================
+# USAGE EXAMPLES
+# =============================================================================
+
+# Start all services:
+# docker-compose -f docker-compose.local.yml up --build
+
+# Start specific services:
+# docker-compose -f docker-compose.local.yml up postgres content-service
+
+# View logs:
+# docker-compose -f docker-compose.local.yml logs -f content-service
+
+# Run database migrations:
+# docker-compose -f docker-compose.local.yml exec content-service alembic upgrade head
+
+# Access PostgreSQL:
+# docker-compose -f docker-compose.local.yml exec postgres psql -U postgres -d content_db
+
+# Access DynamoDB Local Admin UI:
+# Open http://localhost:8000/shell in browser
+
+# Stop all services:
+# docker-compose -f docker-compose.local.yml down
+
+# Remove all data (reset):
+# docker-compose -f docker-compose.local.yml down -v
+
+# =============================================================================
+# DEVELOPMENT NOTES
+# =============================================================================
+
+# Service URLs (when running):
+# - Content Service API: http://localhost:8001/content/docs
+# - User Service API: http://localhost:8002/users/docs  
+# - ML Service API: http://localhost:8003/ml/docs
+# - Adaptive Service API: http://localhost:8004/adaptive/docs
+# - Nginx (if enabled): http://localhost/
+# - LocalStack: http://localhost:4566
+# - DynamoDB Local: http://localhost:8000
+# - PostgreSQL: localhost:5432
+# - Redis: localhost:6379
+
+# Default credentials:
+# - PostgreSQL: postgres/localdev_password_123
+# - AWS LocalStack: localstack/localstack  
+
+# Hot reloading:
+# Source code is mounted as volumes for development.
+# Changes to Python files will trigger automatic reloads.
+
+# Database setup:
+# init-databases.sql creates content_db and user_db automatically.
+
+# Environment variables:
+# All services use development-friendly defaults.
+# Override by creating .env files or modifying this file.
+
+# Production differences:
+# - Use managed AWS services (RDS, DynamoDB, S3, Cognito)
+# - Use AWS Secrets Manager for credentials
+# - Enable HTTPS/SSL
+# - Use production-grade instance sizes
+# - Enable monitoring and logging
+# - Use proper domain names and certificates

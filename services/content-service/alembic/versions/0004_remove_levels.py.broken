@@ -1,0 +1,241 @@
+"""Remove Level entity and refactor to simple architecture
+
+Revision ID: 0004_remove_levels
+Revises: 0003_portuguese_content
+Create Date: 2025-11-15 01:30:00.000000
+
+Changes:
+- Drop 'levels' table completely
+- Add 'topic_id' column to 'exercises' table  
+- Add 'difficulty' column to 'exercises' table (enum: easy, medium, hard)
+- Add 'video_url', 'language', 'learning_language' columns to 'exercises'
+- Add 'levels' JSONB column to 'topics' table (auto-generated array)
+- Add 'image_url' column to 'topics' table
+- Update 'exercise_base' to reference 'topic_id' instead of 'level_id'
+- Add 'difficulty' column to 'exercise_base'
+- Drop foreign key constraints from Level
+- Remove all Level references
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+# revision identifiers
+revision = '0004_remove_levels'
+down_revision = '0001_initial'
+branch_labels = None
+depends_on = None
+
+
+# Default levels array para todos los topics
+DEFAULT_LEVELS = [
+    {"difficulty": "easy", "description": "Nivel básico para principiantes", "imageUrl": None},
+    {"difficulty": "medium", "description": "Nivel intermedio con mayor dificultad", "imageUrl": None},
+    {"difficulty": "hard", "description": "Nivel avanzado para expertos", "imageUrl": None}
+]
+
+
+def upgrade() -> None:
+    """
+    Migración para eliminar Level y simplificar arquitectura
+    """
+    
+    # ===========================================================================
+    # PASO 1: Preparar tablas existentes antes de eliminar Level
+    # ===========================================================================
+    
+    # 1.1 Añadir columnas temporales a exercises para migrar datos
+    print("🔧 Añadiendo columnas temporales a exercises...")
+    op.add_column('exercises', sa.Column('topic_id_temp', sa.Integer(), nullable=True))
+    op.add_column('exercises', sa.Column('difficulty_temp', sa.String(20), nullable=True))
+    
+    # 1.2 Migrar datos: copiar topic_id desde levels y mapear difficulty
+    print("📦 Migrando datos de levels a exercises...")
+    op.execute("""
+        UPDATE exercises e
+        SET topic_id_temp = l.topic_id,
+            difficulty_temp = CASE 
+                WHEN l.difficulty::text = 'BEGINNER' THEN 'easy'
+                WHEN l.difficulty::text = 'INTERMEDIATE' THEN 'medium'
+                WHEN l.difficulty::text = 'ADVANCED' THEN 'hard'
+                ELSE 'easy'
+            END
+        FROM levels l
+        WHERE e.level_id = l.id
+    """)
+    
+    # ===========================================================================
+    # PASO 2: Eliminar foreign keys que referencian a levels
+    # ===========================================================================
+    
+    print("🗑️  Eliminando foreign keys de level_id...")
+    
+    # Drop FK en exercises
+    try:
+        op.drop_constraint('exercises_level_id_fkey', 'exercises', type_='foreignkey')
+    except:
+        print("   ⚠️  Foreign key exercises_level_id_fkey no existe")
+    
+    try:
+        op.drop_index('ix_exercises_level_order', table_name='exercises')
+    except:
+        print("   ⚠️  Index ix_exercises_level_order no existe")
+    
+    # Drop FK en exercise_base
+    op.drop_constraint('exercise_base_level_id_fkey', 'exercise_base', type_='foreignkey')
+    op.drop_index('ix_exercise_base_level_order', table_name='exercise_base')
+    
+    # ===========================================================================
+    # PASO 3: Eliminar columnas level_id obsoletas
+    # ===========================================================================
+    
+    print("🗑️  Eliminando columnas level_id...")
+    op.drop_column('exercises', 'level_id')
+    op.drop_column('exercise_base', 'level_id')
+    
+    # ===========================================================================
+    # PASO 4: Renombrar columnas temporales a definitivas
+    # ===========================================================================
+    
+    print("🔄 Renombrando columnas temporales...")
+    
+    # En exercises
+    op.alter_column('exercises', 'topic_id_temp', new_column_name='topic_id')
+    op.alter_column('exercises', 'difficulty_temp', new_column_name='difficulty')
+    
+    # En exercise_base  
+    op.alter_column('exercise_base', 'topic_id_temp', new_column_name='topic_id')
+    op.alter_column('exercise_base', 'difficulty_temp', new_column_name='difficulty')
+    
+    # ===========================================================================
+    # PASO 5: Aplicar NOT NULL y foreign keys a nuevas columnas
+    # ===========================================================================
+    
+    print("✅ Aplicando constraints a nuevas columnas...")
+    
+    # Hacer topic_id NOT NULL
+    op.alter_column('exercises', 'topic_id', nullable=False)
+    op.alter_column('exercises', 'difficulty', nullable=False)
+    op.alter_column('exercise_base', 'topic_id', nullable=False)
+    op.alter_column('exercise_base', 'difficulty', nullable=False)
+    
+    # Añadir foreign keys
+    op.create_foreign_key(
+        'exercises_topic_id_fkey', 
+        'exercises', 
+        'topics', 
+        ['topic_id'], 
+        ['id'], 
+        ondelete='CASCADE'
+    )
+    
+    op.create_foreign_key(
+        'exercise_base_topic_id_fkey', 
+        'exercise_base', 
+        'topics', 
+        ['topic_id'], 
+        ['id'], 
+        ondelete='CASCADE'
+    )
+    
+    # ===========================================================================
+    # PASO 6: Añadir nuevas columnas a exercises
+    # ===========================================================================
+    
+    print("➕ Añadiendo nuevas columnas a exercises...")
+    op.add_column('exercises', sa.Column('video_url', sa.String(500), nullable=True))
+    op.add_column('exercises', sa.Column('language', sa.String(10), nullable=True))
+    op.add_column('exercises', sa.Column('learning_language', sa.String(10), nullable=True))
+    
+    # ===========================================================================
+    # PASO 7: Crear índices para nuevas columnas
+    # ===========================================================================
+    
+    print("📇 Creando índices optimizados...")
+    op.create_index('ix_exercises_topic_difficulty', 'exercises', ['topic_id', 'difficulty'])
+    op.create_index('ix_exercises_topic_order', 'exercises', ['topic_id', 'order_index'])
+    op.create_index('ix_exercises_difficulty', 'exercises', ['difficulty'])
+    
+    op.create_index('ix_exercise_base_topic_difficulty', 'exercise_base', ['topic_id', 'difficulty'])
+    op.create_index('ix_exercise_base_topic_order', 'exercise_base', ['topic_id', 'order_index'])
+    op.create_index('ix_exercise_base_difficulty', 'exercise_base', ['difficulty'])
+    
+    # ===========================================================================
+    # PASO 8: Añadir columnas a topics (levels JSONB array + image_url)
+    # ===========================================================================
+    
+    print("➕ Añadiendo 'levels' JSONB y 'image_url' a topics...")
+    op.add_column('topics', sa.Column('image_url', sa.String(500), nullable=True))
+    op.add_column(
+        'topics', 
+        sa.Column(
+            'levels', 
+            postgresql.JSONB(astext_type=sa.Text()), 
+            nullable=False,
+            server_default=sa.text("'[]'::jsonb")
+        )
+    )
+    
+    # Actualizar todos los topics existentes con los 3 niveles por defecto
+    print("🔄 Inicializando levels array en topics existentes...")
+    import json
+    levels_json = json.dumps(DEFAULT_LEVELS)
+    op.execute(f"UPDATE topics SET levels = '{levels_json}'::jsonb WHERE levels = '[]'::jsonb")
+    
+    # ===========================================================================
+    # PASO 9: Eliminar columnas obsoletas de topics
+    # ===========================================================================
+    
+    print("🗑️  Eliminando columnas obsoletas de topics...")
+    # Eliminar language_id (deprecated)
+    if 'topics_language_id_fkey' in [c.name for c in op.get_bind().execute("SELECT conname FROM pg_constraint WHERE conrelid = 'topics'::regclass").fetchall()]:
+        op.drop_constraint('topics_language_id_fkey', 'topics', type_='foreignkey')
+    op.drop_index('ix_topics_language_order', table_name='topics')
+    op.drop_column('topics', 'language_id')
+    
+    # ===========================================================================
+    # PASO 10: Eliminar tabla levels completamente
+    # ===========================================================================
+    
+    print("🗑️  ELIMINANDO TABLA LEVELS...")
+    op.drop_index('ix_levels_topic_order', table_name='levels')
+    op.drop_table('levels')
+    
+    # ===========================================================================
+    # PASO 11: Actualizar enum de difficulty en signs
+    # ===========================================================================
+    
+    print("🔄 Actualizando difficulty en tabla signs...")
+    op.execute("""
+        ALTER TABLE signs 
+        ALTER COLUMN difficulty TYPE VARCHAR(20),
+        ALTER COLUMN difficulty SET DEFAULT 'easy'
+    """)
+    
+    op.execute("""
+        UPDATE signs 
+        SET difficulty = CASE 
+            WHEN difficulty = 'beginner' THEN 'easy'
+            WHEN difficulty = 'intermediate' THEN 'medium'
+            WHEN difficulty = 'advanced' THEN 'hard'
+            ELSE 'easy'
+        END
+    """)
+    
+    print("✅ Migración completada exitosamente!")
+
+
+def downgrade() -> None:
+    """
+    Downgrade NO es soportado para esta migración porque:
+    1. La arquitectura anterior con Level era innecesariamente compleja
+    2. Los datos se migran automáticamente a la nueva estructura
+    3. Volver atrás requeriría recrear datos perdidos (level titles, xp_reward, etc.)
+    
+    Si realmente necesitas volver atrás, restaura un backup de la base de datos.
+    """
+    raise NotImplementedError(
+        "⚠️  Downgrade no soportado. "
+        "Esta es una migración destructiva que simplifica la arquitectura. "
+        "Para volver atrás, restaura un backup de la base de datos antes de esta migración."
+    )
