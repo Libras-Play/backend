@@ -1,8 +1,9 @@
+# ⚠️ WORKFLOW DESHABILITADO - Ver ci.yml para tests básicos
 name: CD - Secure OIDC Deployment
 
 on:
-  push:
-    branches:
+  # push:
+    # branches:
       - main
       - staging
   workflow_dispatch:
